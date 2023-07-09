@@ -64,6 +64,9 @@ void ICACHE_RAM_ATTR CRSF::sendLinkStatisticsToFC()
   CRSF::Port.write(outBuffer, LinkStatisticsFrameLength + 4);
 }
 
+
+
+
 void ICACHE_RAM_ATTR CRSF::sendRCFrameToFC()
 {
   uint8_t outBuffer[RCframeLength + 4] = {0};
@@ -80,6 +83,10 @@ void ICACHE_RAM_ATTR CRSF::sendRCFrameToFC()
 
   CRSF::Port.write(outBuffer, RCframeLength + 4);
 }
+
+
+
+
 
 void ICACHE_RAM_ATTR CRSF::FlushSerial()
 {
