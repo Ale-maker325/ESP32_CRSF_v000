@@ -11,6 +11,7 @@ uint8_t CRSF::CSFR_RXpin_Module = 16;
 //U1RXD_IN_IDX
 //U1TXD_OUT_IDX
 
+
 volatile bool CRSF::ignoreSerialData = false;
 volatile bool CRSF::CRSFframeActive = false; //since we get a copy of the serial data use this flag to know when to ignore it
 

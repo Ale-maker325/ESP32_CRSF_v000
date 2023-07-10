@@ -4,6 +4,10 @@
 #include <Arduino.h>
 #include "HardwareSerial.h"
 
+#include <telemetry_protocol.h>
+
+#include <crc.h>
+
 //#ifdef PLATFORM_ESP32
 #include "esp32-hal-uart.h"
 #include <stdio.h>
@@ -15,19 +19,24 @@
 
 #define PACKED __attribute__((packed))
 
-#define CRSF_RX_BAUDRATE 420000
-#define CRSF_OPENTX_BAUDRATE 400000
-#define CRSF_OPENTX_SLOW_BAUDRATE 115200 // Used for QX7 not supporting 400kbps
-#define CRSF_NUM_CHANNELS 16
-#define CRSF_CHANNEL_VALUE_MIN 172
-#define CRSF_CHANNEL_VALUE_MID 992
-#define CRSF_CHANNEL_VALUE_MAX 1811
+
+
+#define CRSF_CRC_POLY 0xd5              //??? - это из библиотеки для ЛРС
+
+#define CRSF_CHANNEL_VALUE_MIN  172     // 987us - actual CRSF min is 0 with E.Limits on
+#define CRSF_CHANNEL_VALUE_1000 191     //??? - это из библиотеки для ЛРС
+#define CRSF_CHANNEL_VALUE_MID  992
+#define CRSF_CHANNEL_VALUE_2000 1792    //??? - это из библиотеки для ЛРС
+#define CRSF_CHANNEL_VALUE_MAX  1811    // 2012us - actual CRSF max is 1984 with E.Limits on
 #define CRSF_MAX_PACKET_LEN 64
 
 #define CRSF_SYNC_BYTE 0xC8
 
 #define RCframeLength 22             // length of the RC data packed bytes frame. 16 channels in 11 bits each.
-#define LinkStatisticsFrameLength 10 // length of the RC data packed bytes frame. 16 channels in 11 bits each.
+#define LinkStatisticsFrameLength 10 //
+#define OpenTXsyncFrameLength 11     ////??? - это из библиотеки для ЛРС
+#define BattSensorFrameLength 8      ////??? - это из библиотеки для ЛРС
+#define VTXcontrolFrameLength 12     ////??? - это из библиотеки для ЛРС
 
 #define CRSF_PAYLOAD_SIZE_MAX 62
 #define CRSF_FRAME_NOT_COUNTED_BYTES 2
@@ -35,43 +44,34 @@
 #define CRSF_EXT_FRAME_SIZE(payload_size) (CRSF_FRAME_SIZE(payload_size) + 2)
 #define CRSF_FRAME_SIZE_MAX (CRSF_PAYLOAD_SIZE_MAX + CRSF_FRAME_NOT_COUNTED_BYTES)
 
-// Macros for big-endian (assume little endian host for now) etc
-#define CRSF_DEC_U16(x) ((uint16_t)__builtin_bswap16(x))
-#define CRSF_DEC_I16(x) ((int16_t)CRSF_DEC_U16(x))
-#define CRSF_DEC_U24(x) (CRSF_DEC_U32((uint32_t)x << 8))
-#define CRSF_DEC_U32(x) ((uint32_t)__builtin_bswap32(x))
-#define CRSF_DEC_I32(x) ((int32_t)CRSF_DEC_U32(x))
+#define CRSF_FRAME_CRC_SIZE 1               //??? - это из библиотеки для ЛРС
+#define CRSF_FRAME_LENGTH_EXT_TYPE_CRC 4    ////??? - это из библиотеки для ЛРС, length of Extended Dest/Origin, TYPE and CRC fields combined
 
-//////////////////////////////////////////////////////////////
+#define CRSF_TELEMETRY_LENGTH_INDEX 1                                       //??? - это из библиотеки для ЛРС
+#define CRSF_TELEMETRY_TYPE_INDEX 2                                         //??? - это из библиотеки для ЛРС
+#define CRSF_TELEMETRY_FIELD_ID_INDEX 5                                     //??? - это из библиотеки для ЛРС
+#define CRSF_TELEMETRY_FIELD_CHUNK_INDEX 6                                  //??? - это из библиотеки для ЛРС
+#define CRSF_TELEMETRY_CRC_LENGTH 1                                         //??? - это из библиотеки для ЛРС
+#define CRSF_TELEMETRY_TOTAL_SIZE(x) (x + CRSF_FRAME_LENGTH_EXT_TYPE_CRC)   //??? - это из библиотеки для ЛРС
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 #define CRSF_MSP_REQ_PAYLOAD_SIZE 8
 #define CRSF_MSP_RESP_PAYLOAD_SIZE 58
 #define CRSF_MSP_MAX_PAYLOAD_SIZE (CRSF_MSP_REQ_PAYLOAD_SIZE > CRSF_MSP_RESP_PAYLOAD_SIZE ? CRSF_MSP_REQ_PAYLOAD_SIZE : CRSF_MSP_RESP_PAYLOAD_SIZE)
 
-/* CRC8 implementation with polynom = x​7​+ x​6​+ x​4​+ x​2​+ x​0 ​(0xD5) */
-static unsigned char crc8tab[256] = {
-    0x00, 0xD5, 0x7F, 0xAA, 0xFE, 0x2B, 0x81, 0x54, 0x29, 0xFC, 0x56, 0x83, 0xD7, 0x02, 0xA8, 0x7D,
-    0x52, 0x87, 0x2D, 0xF8, 0xAC, 0x79, 0xD3, 0x06, 0x7B, 0xAE, 0x04, 0xD1, 0x85, 0x50, 0xFA, 0x2F,
-    0xA4, 0x71, 0xDB, 0x0E, 0x5A, 0x8F, 0x25, 0xF0, 0x8D, 0x58, 0xF2, 0x27, 0x73, 0xA6, 0x0C, 0xD9,
-    0xF6, 0x23, 0x89, 0x5C, 0x08, 0xDD, 0x77, 0xA2, 0xDF, 0x0A, 0xA0, 0x75, 0x21, 0xF4, 0x5E, 0x8B,
-    0x9D, 0x48, 0xE2, 0x37, 0x63, 0xB6, 0x1C, 0xC9, 0xB4, 0x61, 0xCB, 0x1E, 0x4A, 0x9F, 0x35, 0xE0,
-    0xCF, 0x1A, 0xB0, 0x65, 0x31, 0xE4, 0x4E, 0x9B, 0xE6, 0x33, 0x99, 0x4C, 0x18, 0xCD, 0x67, 0xB2,
-    0x39, 0xEC, 0x46, 0x93, 0xC7, 0x12, 0xB8, 0x6D, 0x10, 0xC5, 0x6F, 0xBA, 0xEE, 0x3B, 0x91, 0x44,
-    0x6B, 0xBE, 0x14, 0xC1, 0x95, 0x40, 0xEA, 0x3F, 0x42, 0x97, 0x3D, 0xE8, 0xBC, 0x69, 0xC3, 0x16,
-    0xEF, 0x3A, 0x90, 0x45, 0x11, 0xC4, 0x6E, 0xBB, 0xC6, 0x13, 0xB9, 0x6C, 0x38, 0xED, 0x47, 0x92,
-    0xBD, 0x68, 0xC2, 0x17, 0x43, 0x96, 0x3C, 0xE9, 0x94, 0x41, 0xEB, 0x3E, 0x6A, 0xBF, 0x15, 0xC0,
-    0x4B, 0x9E, 0x34, 0xE1, 0xB5, 0x60, 0xCA, 0x1F, 0x62, 0xB7, 0x1D, 0xC8, 0x9C, 0x49, 0xE3, 0x36,
-    0x19, 0xCC, 0x66, 0xB3, 0xE7, 0x32, 0x98, 0x4D, 0x30, 0xE5, 0x4F, 0x9A, 0xCE, 0x1B, 0xB1, 0x64,
-    0x72, 0xA7, 0x0D, 0xD8, 0x8C, 0x59, 0xF3, 0x26, 0x5B, 0x8E, 0x24, 0xF1, 0xA5, 0x70, 0xDA, 0x0F,
-    0x20, 0xF5, 0x5F, 0x8A, 0xDE, 0x0B, 0xA1, 0x74, 0x09, 0xDC, 0x76, 0xA3, 0xF7, 0x22, 0x88, 0x5D,
-    0xD6, 0x03, 0xA9, 0x7C, 0x28, 0xFD, 0x57, 0x82, 0xFF, 0x2A, 0x80, 0x55, 0x01, 0xD4, 0x7E, 0xAB,
-    0x84, 0x51, 0xFB, 0x2E, 0x7A, 0xAF, 0x05, 0xD0, 0xAD, 0x78, 0xD2, 0x07, 0x53, 0x86, 0x2C, 0xF9};
+
+
 
 typedef enum
 {
     CRSF_FRAMETYPE_GPS = 0x02,
+    CRSF_FRAMETYPE_VARIO = 0x07,
     CRSF_FRAMETYPE_BATTERY_SENSOR = 0x08,
+    CRSF_FRAMETYPE_BARO_ALTITUDE = 0x09,
     CRSF_FRAMETYPE_LINK_STATISTICS = 0x14,
+    CRSF_FRAMETYPE_OPENTX_SYNC = 0x10,
+    CRSF_FRAMETYPE_RADIO_ID = 0x3A,
     CRSF_FRAMETYPE_RC_CHANNELS_PACKED = 0x16,
     CRSF_FRAMETYPE_ATTITUDE = 0x1E,
     CRSF_FRAMETYPE_FLIGHT_MODE = 0x21,
@@ -81,12 +81,51 @@ typedef enum
     CRSF_FRAMETYPE_PARAMETER_SETTINGS_ENTRY = 0x2B,
     CRSF_FRAMETYPE_PARAMETER_READ = 0x2C,
     CRSF_FRAMETYPE_PARAMETER_WRITE = 0x2D,
+
+    //CRSF_FRAMETYPE_ELRS_STATUS = 0x2E, ELRS good/bad packet count and status flags
+
     CRSF_FRAMETYPE_COMMAND = 0x32,
+    // KISS frames
+    CRSF_FRAMETYPE_KISS_REQ  = 0x78,
+    CRSF_FRAMETYPE_KISS_RESP = 0x79,
     // MSP commands
     CRSF_FRAMETYPE_MSP_REQ = 0x7A,   // response request using msp sequence as command
     CRSF_FRAMETYPE_MSP_RESP = 0x7B,  // reply with 58 byte chunked binary
     CRSF_FRAMETYPE_MSP_WRITE = 0x7C, // write with 8 byte chunked binary (OpenTX outbound telemetry buffer limit)
+    // Ardupilot frames
+    CRSF_FRAMETYPE_ARDUPILOT_RESP = 0x80,
 } crsf_frame_type_e;
+
+
+//??? - это из библиотеки для ЛРС
+typedef enum {
+    SUBCOMMAND_CRSF = 0x10
+} crsf_command_e;
+
+//??? - это из библиотеки для ЛРС
+typedef enum {
+    COMMAND_MODEL_SELECT_ID = 0x05
+} crsf_subcommand_e;
+
+//??? - это из библиотеки для ЛРС
+enum {
+    CRSF_FRAME_TX_MSP_FRAME_SIZE = 58,
+    CRSF_FRAME_RX_MSP_FRAME_SIZE = 8,
+    CRSF_FRAME_ORIGIN_DEST_SIZE = 2,
+};
+
+//??? - это из библиотеки для ЛРС
+enum {
+    CRSF_FRAME_GPS_PAYLOAD_SIZE = 15,
+    CRSF_FRAME_VARIO_PAYLOAD_SIZE = 2,
+    CRSF_FRAME_BARO_ALTITUDE_PAYLOAD_SIZE = 4, // TBS version is 2, ELRS is 4 (combines vario)
+    CRSF_FRAME_BATTERY_SENSOR_PAYLOAD_SIZE = 8,
+    CRSF_FRAME_ATTITUDE_PAYLOAD_SIZE = 6,
+    CRSF_FRAME_DEVICE_INFO_PAYLOAD_SIZE = 48,
+    CRSF_FRAME_FLIGHT_MODE_PAYLOAD_SIZE = 16,
+    CRSF_FRAME_GENERAL_RESP_PAYLOAD_SIZE = CRSF_EXT_FRAME_SIZE(CRSF_FRAME_TX_MSP_FRAME_SIZE)
+};
+
 
 typedef enum
 {
@@ -103,7 +142,9 @@ typedef enum
     CRSF_ADDRESS_RADIO_TRANSMITTER = 0xEA,
     CRSF_ADDRESS_CRSF_RECEIVER = 0xEC,
     CRSF_ADDRESS_CRSF_TRANSMITTER = 0xEE,
+    CRSF_ADDRESS_ELRS_LUA = 0xEF
 } crsf_addr_e;
+
 
 //typedef struct crsf_addr_e asas;
 
@@ -127,12 +168,28 @@ typedef enum
     CRSF_OUT_OF_RANGE = 127,
 } crsf_value_type_e;
 
+
+//??? - это из библиотеки для ЛРС
+// These flags are or'ed with the field type above to hide the field from the normal LUA view
+#define CRSF_FIELD_HIDDEN       0x80     // marked as hidden in all LUA responses   //??? - это из библиотеки для ЛРС
+#define CRSF_FIELD_ELRS_HIDDEN  0x40     // marked as hidden when talking to ELRS specific LUA  //??? - это из библиотеки для ЛРС
+#define CRSF_FIELD_TYPE_MASK    ~(CRSF_FIELD_HIDDEN|CRSF_FIELD_ELRS_HIDDEN)         //??? - это из библиотеки для ЛРС
+
+
+
+/**
+ * Define the shape of a standard header
+ */
 typedef struct crsf_header_s
 {
     uint8_t device_addr; // from crsf_addr_e
     uint8_t frame_size;  // counts size after this byte, so it must be the payload size + 2 (type and crc)
     uint8_t type;        // from crsf_frame_type_e
 } PACKED crsf_header_t;
+
+#define CRSF_MK_FRAME_T(payload) struct payload##_frame_s { crsf_header_t h; payload p; uint8_t crc; } PACKED   //??? - это из библиотеки для ЛРС
+
+
 
 // Used by extended header frames (type in range 0x28 to 0x96)
 typedef struct crsf_ext_header_s
@@ -146,6 +203,10 @@ typedef struct crsf_ext_header_s
     uint8_t orig_addr;
 } PACKED crsf_ext_header_t;
 
+
+/**
+ * Crossfire packed channel structure, each channel is 11 bits
+ */
 typedef struct crsf_channels_s
 {
     unsigned ch0 : 11;
@@ -166,7 +227,121 @@ typedef struct crsf_channels_s
     unsigned ch15 : 11;
 } PACKED crsf_channels_t;
 
+
 typedef struct crsf_channels_s crsf_channels_t;
+
+
+
+/**
+ * Define the shape of a standard packet
+ * A 'standard' header followed by the packed channels
+ */
+typedef struct rcPacket_s
+{
+    crsf_header_t header;
+    crsf_channels_s channels;
+} PACKED rcPacket_t;            //??? - это из библиотеки для ЛРС
+
+typedef struct deviceInformationPacket_s
+{
+    uint32_t serialNo;
+    uint32_t hardwareVer;
+    uint32_t softwareVer;
+    uint8_t fieldCnt;          //number of field of params this device has
+    uint8_t parameterVersion;
+} PACKED deviceInformationPacket_t;             //??? - это из библиотеки для ЛРС
+
+
+#define DEVICE_INFORMATION_PAYLOAD_LENGTH (sizeof(deviceInformationPacket_t) + strlen(device_name)+1)                       //??? - это из библиотеки для ЛРС
+#define DEVICE_INFORMATION_LENGTH (sizeof(crsf_ext_header_t) + DEVICE_INFORMATION_PAYLOAD_LENGTH + CRSF_FRAME_CRC_SIZE)     //??? - это из библиотеки для ЛРС
+#define DEVICE_INFORMATION_FRAME_SIZE (DEVICE_INFORMATION_PAYLOAD_LENGTH + CRSF_FRAME_LENGTH_EXT_TYPE_CRC)                  //??? - это из библиотеки для ЛРС
+
+// https://github.com/betaflight/betaflight/blob/master/src/main/msp/msp.c#L1949
+typedef struct mspVtxConfigPacket_s
+{
+    uint8_t vtxType;
+    uint8_t band;
+    uint8_t channel;
+    uint8_t power;
+    uint8_t pitmode;
+    uint16_t freq;
+    uint8_t deviceIsReady;
+    uint8_t lowPowerDisarm;
+    uint16_t pitModeFreq;
+    uint8_t vtxTableAvailable;
+    uint8_t bands;
+    uint8_t channels;
+    uint8_t powerLevels;
+} PACKED mspVtxConfigPacket_t;          //??? - это из библиотеки для ЛРС
+
+
+typedef struct mspVtxPowerLevelPacket_s
+{
+    uint8_t powerLevel;
+    uint16_t powerValue;
+    uint8_t powerLabelLength;
+    uint8_t label[3];
+} PACKED mspVtxPowerLevelPacket_t; //??? - это из библиотеки для ЛРС
+
+typedef struct mspVtxBandPacket_s
+{
+    uint8_t band;
+    uint8_t bandNameLength;
+    uint8_t bandName[8];
+    uint8_t bandLetter;
+    uint8_t isFactoryBand;
+    uint8_t channels;
+    uint16_t channel[8];
+} PACKED mspVtxBandPacket_t; //??? - это из библиотеки для ЛРС
+
+
+#define MSP_REQUEST_PAYLOAD_LENGTH(len) 7 + len // status + flags + 2 function + 2 length + crc + payload               //??? - это из библиотеки для ЛРС
+#define MSP_REQUEST_LENGTH(len) (sizeof(crsf_ext_header_t) + MSP_REQUEST_PAYLOAD_LENGTH(len) + CRSF_FRAME_CRC_SIZE)     //??? - это из библиотеки для ЛРС
+#define MSP_REQUEST_FRAME_SIZE(len) (MSP_REQUEST_PAYLOAD_LENGTH(len) + CRSF_FRAME_LENGTH_EXT_TYPE_CRC)                  //??? - это из библиотеки для ЛРС
+
+#define MSP_SET_VTX_CONFIG_PAYLOAD_LENGTH 15                                                                            //??? - это из библиотеки для ЛРС
+#define MSP_SET_VTXTABLE_BAND_PAYLOAD_LENGTH 29                                                                         //??? - это из библиотеки для ЛРС
+#define MSP_SET_VTXTABLE_POWERLEVEL_PAYLOAD_LENGTH 7                                                                    //??? - это из библиотеки для ЛРС
+
+
+
+/**
+ * Union to allow accessing the input buffer as different data shapes
+ * without generating compiler warnings (and relying on undefined C++ behaviour!)
+ * Each entry in the union provides a different view of the same memory.
+ * This is just the defintion of the union, the declaration of the variable that
+ * uses it is later in the file.
+ * 
+ * //??? - это из библиотеки для ЛРС
+ */
+union inBuffer_U
+{
+    uint8_t asUint8_t[CRSF_MAX_PACKET_LEN]; // max 64 bytes for CRSF packet serial buffer
+    rcPacket_t asRCPacket_t;    // access the memory as RC data
+                                // add other packet types here
+};
+
+
+
+
+//CRSF_FRAMETYPE_BATTERY_SENSOR     //??? - это из библиотеки для ЛРС
+typedef struct crsf_sensor_battery_s
+{
+    unsigned voltage : 16;  // mv * 100 BigEndian
+    unsigned current : 16;  // ma * 100
+    unsigned capacity : 24; // mah
+    unsigned remaining : 8; // %
+} PACKED crsf_sensor_battery_t;
+
+// CRSF_FRAMETYPE_BARO_ALTITUDE     //??? - это из библиотеки для ЛРС
+typedef struct crsf_sensor_baro_vario_s
+{
+    uint16_t altitude; // Altitude in decimeters + 10000dm, or Altitude in meters if high bit is set, BigEndian
+    int16_t verticalspd;  // Vertical speed in cm/s, BigEndian
+} PACKED crsf_sensor_baro_vario_t;
+
+
+
 
 /*
  * 0x14 Link statistics
@@ -201,32 +376,397 @@ typedef struct crsfPayloadLinkstatistics_s
 
 typedef struct crsfPayloadLinkstatistics_s crsfLinkStatistics_t;
 
+// typedef struct crsfOpenTXsyncFrame_s
+// {
+//     uint32_t adjustedRefreshRate;
+//     uint32_t lastUpdate;
+//     uint16_t refreshRate;
+//     int8_t refreshRate;
+//     uint16_t inputLag;
+//     uint8_t interval;
+//     uint8_t target;
+//     uint8_t downlink_RSSI;
+//     uint8_t downlink_Link_quality;
+//     int8_t downlink_SNR;
+// } crsfOpenTXsyncFrame_t;
+
+// typedef struct crsfOpenTXsyncFrame_s crsfOpenTXsyncFrame_t;
+
+
+
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+/////inline and utility functions//////
+
+static uint16_t ICACHE_RAM_ATTR fmap(uint16_t x, uint16_t in_min, uint16_t in_max, uint16_t out_min, uint16_t out_max)
+{
+    return ((x - in_min) * (out_max - out_min) * 2 / (in_max - in_min) + out_min * 2 + 1) / 2;
+}
+
+// Scale a -100& to +100% crossfire value to 988-2012 (Taranis channel uS)
+static inline uint16_t ICACHE_RAM_ATTR CRSF_to_US(uint16_t val)
+{
+    return fmap(val, CRSF_CHANNEL_VALUE_MIN, CRSF_CHANNEL_VALUE_MAX, 988, 2012);
+}
+
+// Scale down a 10-bit value to a -100& to +100% crossfire value
+static inline uint16_t ICACHE_RAM_ATTR UINT10_to_CRSF(uint16_t val)
+{
+    return fmap(val, 0, 1023, CRSF_CHANNEL_VALUE_MIN, CRSF_CHANNEL_VALUE_MAX);
+}
+
+
+
+//////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+//Код ниже я закомментировал - он не совпадает со старым кодом!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+
 /////inline and utility functions//////
 
 //static uint16_t ICACHE_RAM_ATTR fmap(uint16_t x, float in_min, float in_max, float out_min, float out_max) { return (x - in_min) * (out_max - out_min) / (in_max - in_min) + out_min; };
-static uint16_t ICACHE_RAM_ATTR fmap(uint16_t x, uint16_t in_min, uint16_t in_max, uint16_t out_min, uint16_t out_max) { return (x - in_min) * (out_max - out_min) / (in_max - in_min) + out_min; };
+// static uint16_t ICACHE_RAM_ATTR fmap(uint16_t x, uint16_t in_min, uint16_t in_max, uint16_t out_min, uint16_t out_max) {
+//     return (x - in_min) * (out_max - out_min) / (in_max - in_min) + out_min; 
+// };
 
-static inline uint16_t ICACHE_RAM_ATTR CRSF_to_US(uint16_t Val) { return round(fmap(Val, 172.0, 1811.0, 988.0, 2012.0)); };
-static inline uint16_t ICACHE_RAM_ATTR UINT10_to_CRSF(uint16_t Val) { return round(fmap(Val, 0.0, 1024.0, 172.0, 1811.0)); };
+// static inline uint16_t ICACHE_RAM_ATTR CRSF_to_US(uint16_t Val) { return round(fmap(Val, 172.0, 1811.0, 988.0, 2012.0)); };
+// static inline uint16_t ICACHE_RAM_ATTR UINT10_to_CRSF(uint16_t Val) { return round(fmap(Val, 0.0, 1024.0, 172.0, 1811.0)); };
 
-static inline uint16_t ICACHE_RAM_ATTR SWITCH3b_to_CRSF(uint16_t Val) { return round(map(Val, 0, 7, 188, 1795)); };
 
-static inline uint8_t ICACHE_RAM_ATTR CRSF_to_BIT(uint16_t Val)
+
+//Это конец закомментированного кода, который не совпадает со старым кодом
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+
+
+// Scale up a -100& to +100% crossfire value to 10-bit
+static inline uint16_t ICACHE_RAM_ATTR CRSF_to_UINT10(uint16_t val)
 {
-    if (Val > 1000)
-        return 1;
-    else
+    return fmap(val, CRSF_CHANNEL_VALUE_MIN, CRSF_CHANNEL_VALUE_MAX, 0, 1023);
+}
+
+///Это то, что было ранее, вместо верхнего кода
+// static inline uint16_t ICACHE_RAM_ATTR CRSF_to_UINT10(uint16_t Val) { 
+//     return round(fmap(Val, 172.0, 1811.0, 0.0, 1023.0)); 
+// };
+
+
+// Convert 0-max to the CRSF values for 1000-2000       //??? - это из библиотеки для ЛРС
+static inline uint16_t ICACHE_RAM_ATTR N_to_CRSF(uint16_t val, uint16_t max)
+{
+    return val * (CRSF_CHANNEL_VALUE_2000-CRSF_CHANNEL_VALUE_1000) / max + CRSF_CHANNEL_VALUE_1000;
+}
+
+
+
+// Convert CRSF to 0-(cnt-1), constrained between 1000us and 2000us         //??? - это из библиотеки для ЛРС
+static inline uint16_t ICACHE_RAM_ATTR CRSF_to_N(uint16_t val, uint16_t cnt)
+{
+    // The span is increased by one to prevent the max val from returning cnt
+    if (val <= CRSF_CHANNEL_VALUE_1000)
         return 0;
-};
-static inline uint16_t ICACHE_RAM_ATTR BIT_to_CRSF(uint8_t Val)
+    if (val >= CRSF_CHANNEL_VALUE_2000)
+        return cnt - 1;
+    return (val - CRSF_CHANNEL_VALUE_1000) * cnt / (CRSF_CHANNEL_VALUE_2000 - CRSF_CHANNEL_VALUE_1000 + 1);
+}
+
+
+
+
+// 3b switches use 0-5 to represent 6 positions switches and "7" to represent middle
+// The calculation is a bit non-linear all the way to the endpoints due to where
+// Ardupilot defines its modes
+static inline uint16_t ICACHE_RAM_ATTR SWITCH3b_to_CRSF(uint16_t val)
 {
-    if (Val)
-        return 1795;
-    else
-        return 188;
+    switch (val)
+    {
+    case 0: return CRSF_CHANNEL_VALUE_1000;
+    case 5: return CRSF_CHANNEL_VALUE_2000;
+    case 6: // fallthrough
+    case 7: return CRSF_CHANNEL_VALUE_MID;
+    default: // (val - 1) * 240 + 630; aka 150us spacing, starting at 1275
+        return val * 240 + 391;
+    }
+}
+
+//Это старый код, который был
+//static inline uint16_t ICACHE_RAM_ATTR SWITCH3b_to_CRSF(uint16_t Val) { return round(map(Val, 0, 7, 188, 1795)); };
+
+
+// Returns 1 if val is greater than CRSF_CHANNEL_VALUE_MID
+static inline uint8_t ICACHE_RAM_ATTR CRSF_to_BIT(uint16_t val)
+{
+    return (val > CRSF_CHANNEL_VALUE_MID) ? 1 : 0;
+}
+
+//Это старый код, который был
+// static inline uint8_t ICACHE_RAM_ATTR CRSF_to_BIT(uint16_t Val)
+// {
+//     if (Val > 1000)
+//         return 1;
+//     else
+//         return 0;
+// };
+
+
+
+// Convert a bit into either the CRSF value for 1000 or 2000
+static inline uint16_t ICACHE_RAM_ATTR BIT_to_CRSF(uint8_t val)
+{
+    return (val) ? CRSF_CHANNEL_VALUE_2000 : CRSF_CHANNEL_VALUE_1000;
+}
+
+
+//Это старый код, который был
+// static inline uint16_t ICACHE_RAM_ATTR BIT_to_CRSF(uint8_t Val)
+// {
+//     if (Val)
+//         return 1795;
+//     else
+//         return 188;
+// };
+
+
+
+//??? - это из библиотеки для ЛРС
+static inline uint8_t ICACHE_RAM_ATTR CalcCRCMsp(uint8_t *data, int length)
+{
+    uint8_t crc = 0;
+    for (uint8_t i = 0; i < length; ++i) {
+        crc = crc ^ *data++;
+    }
+    return crc;
+}
+
+
+
+
+#if !defined(__linux__)
+static inline uint16_t htobe16(uint16_t val)
+{
+#if (__BYTE_ORDER__ == __ORDER_BIG_ENDIAN__)
+    return val;
+#else
+    return __builtin_bswap16(val);
+#endif
+}
+
+static inline uint16_t be16toh(uint16_t val)
+{
+#if (__BYTE_ORDER__ == __ORDER_BIG_ENDIAN__)
+    return val;
+#else
+    return __builtin_bswap16(val);
+#endif
+}
+
+static inline uint32_t htobe32(uint32_t val)
+{
+#if (__BYTE_ORDER__ == __ORDER_BIG_ENDIAN__)
+    return val;
+#else
+    return __builtin_bswap32(val);
+#endif
+}
+
+static inline uint32_t be32toh(uint32_t val)
+{
+#if (__BYTE_ORDER__ == __ORDER_BIG_ENDIAN__)
+    return val;
+#else
+    return __builtin_bswap32(val);
+#endif
+}
+#endif
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+#define CRSF_RX_BAUDRATE 420000
+#define CRSF_OPENTX_BAUDRATE 400000
+#define CRSF_OPENTX_SLOW_BAUDRATE 115200 // Used for QX7 not supporting 400kbps
+#define CRSF_NUM_CHANNELS 16
+
+//Добавлено из новой библиотеки, но без приставки static не хотело компилироваться
+static uint32_t ChannelData[CRSF_NUM_CHANNELS];      // Current state of channels, CRSF format
+
+
+
+
+
+
+
+
+
+
+
+
+// Macros for big-endian (assume little endian host for now) etc
+#define CRSF_DEC_U16(x) ((uint16_t)__builtin_bswap16(x))
+#define CRSF_DEC_I16(x) ((int16_t)CRSF_DEC_U16(x))
+#define CRSF_DEC_U24(x) (CRSF_DEC_U32((uint32_t)x << 8))
+#define CRSF_DEC_U32(x) ((uint32_t)__builtin_bswap32(x))
+#define CRSF_DEC_I32(x) ((int32_t)CRSF_DEC_U32(x))
+
+//////////////////////////////////////////////////////////////
+
+
+
+
+
+/* CRC8 implementation with polynom = x​7​+ x​6​+ x​4​+ x​2​+ x​0 ​(0xD5) */
+static unsigned char crc8tab[256] = {
+    0x00, 0xD5, 0x7F, 0xAA, 0xFE, 0x2B, 0x81, 0x54, 0x29, 0xFC, 0x56, 0x83, 0xD7, 0x02, 0xA8, 0x7D,
+    0x52, 0x87, 0x2D, 0xF8, 0xAC, 0x79, 0xD3, 0x06, 0x7B, 0xAE, 0x04, 0xD1, 0x85, 0x50, 0xFA, 0x2F,
+    0xA4, 0x71, 0xDB, 0x0E, 0x5A, 0x8F, 0x25, 0xF0, 0x8D, 0x58, 0xF2, 0x27, 0x73, 0xA6, 0x0C, 0xD9,
+    0xF6, 0x23, 0x89, 0x5C, 0x08, 0xDD, 0x77, 0xA2, 0xDF, 0x0A, 0xA0, 0x75, 0x21, 0xF4, 0x5E, 0x8B,
+    0x9D, 0x48, 0xE2, 0x37, 0x63, 0xB6, 0x1C, 0xC9, 0xB4, 0x61, 0xCB, 0x1E, 0x4A, 0x9F, 0x35, 0xE0,
+    0xCF, 0x1A, 0xB0, 0x65, 0x31, 0xE4, 0x4E, 0x9B, 0xE6, 0x33, 0x99, 0x4C, 0x18, 0xCD, 0x67, 0xB2,
+    0x39, 0xEC, 0x46, 0x93, 0xC7, 0x12, 0xB8, 0x6D, 0x10, 0xC5, 0x6F, 0xBA, 0xEE, 0x3B, 0x91, 0x44,
+    0x6B, 0xBE, 0x14, 0xC1, 0x95, 0x40, 0xEA, 0x3F, 0x42, 0x97, 0x3D, 0xE8, 0xBC, 0x69, 0xC3, 0x16,
+    0xEF, 0x3A, 0x90, 0x45, 0x11, 0xC4, 0x6E, 0xBB, 0xC6, 0x13, 0xB9, 0x6C, 0x38, 0xED, 0x47, 0x92,
+    0xBD, 0x68, 0xC2, 0x17, 0x43, 0x96, 0x3C, 0xE9, 0x94, 0x41, 0xEB, 0x3E, 0x6A, 0xBF, 0x15, 0xC0,
+    0x4B, 0x9E, 0x34, 0xE1, 0xB5, 0x60, 0xCA, 0x1F, 0x62, 0xB7, 0x1D, 0xC8, 0x9C, 0x49, 0xE3, 0x36,
+    0x19, 0xCC, 0x66, 0xB3, 0xE7, 0x32, 0x98, 0x4D, 0x30, 0xE5, 0x4F, 0x9A, 0xCE, 0x1B, 0xB1, 0x64,
+    0x72, 0xA7, 0x0D, 0xD8, 0x8C, 0x59, 0xF3, 0x26, 0x5B, 0x8E, 0x24, 0xF1, 0xA5, 0x70, 0xDA, 0x0F,
+    0x20, 0xF5, 0x5F, 0x8A, 0xDE, 0x0B, 0xA1, 0x74, 0x09, 0xDC, 0x76, 0xA3, 0xF7, 0x22, 0x88, 0x5D,
+    0xD6, 0x03, 0xA9, 0x7C, 0x28, 0xFD, 0x57, 0x82, 0xFF, 0x2A, 0x80, 0x55, 0x01, 0xD4, 0x7E, 0xAB,
+    0x84, 0x51, 0xFB, 0x2E, 0x7A, 0xAF, 0x05, 0xD0, 0xAD, 0x78, 0xD2, 0x07, 0x53, 0x86, 0x2C, 0xF9
 };
 
-static inline uint16_t ICACHE_RAM_ATTR CRSF_to_UINT10(uint16_t Val) { return round(fmap(Val, 172.0, 1811.0, 0.0, 1023.0)); };
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+//////////////        ЭТО СТАРАЯ БИБЛИОТЕКА    ///////////////////////////////////////
+
 static inline uint16_t ICACHE_RAM_ATTR UINT_to_CRSF(uint16_t Val);
 
 static inline uint8_t ICACHE_RAM_ATTR CalcCRC(volatile uint8_t *data, int length);
@@ -252,10 +792,31 @@ uint8_t ICACHE_RAM_ATTR CalcCRC(uint8_t *data, int length)
     return crc;
 }
 
+
+/////////////////////////////////////////////////////////////////////////////////////
+/////////////////////////////////////////////////////////////////////////////////////
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 class CRSF
 {
 
 public:
+
+
 #ifdef PLATFORM_ESP8266
     //CRSF(HardwareSerial& serial);
     CRSF(Stream *dev) : _dev(dev) {}
@@ -267,8 +828,10 @@ public:
     }
 
 #endif
+
+//#ifdef CRSF_TX_MODULE     //это в основной библиотеке
     static HardwareSerial Port;
-    //static Stream *Port;
+    static Stream *PortSecondary; //Это из основной библиотеки,,, A second UART used to mirror telemetry out on the TX, not read from
 
     static volatile uint16_t ChannelDataIn[16];
     static volatile uint16_t ChannelDataInPrev[16]; // Contains the previous RC channel data
@@ -279,29 +842,113 @@ public:
 
     static void (*disconnected)();
     static void (*connected)();
+    static void (*RecvModelUpdate)();   //это добавлено из бибилиотеки
+    
+    /////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
-    static void (*RecvParameterUpdate)();
+    //это добавлено из библиотеки
+    //static void (*RecvParameterUpdate)(uint8_t type, uint8_t index, uint8_t arg);
+    //это было старая запись
+    static void (*RecvParameterUpdate)(); 
+    
+    /////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
-    static volatile uint8_t ParameterUpdateData[2];
 
-    static bool firstboot;
+
+    //это добавлено из библиотеки
+    static void (*RCdataCallback)();
+
+    // The model ID as received from the Transmitter
+    //эти три строки добавлены из библиотеки
+    static uint8_t modelId;
+    static bool ForwardDevicePings; // true if device pings should be forwarded OTA
+    static bool elrsLUAmode;
+
+    /// UART Handling ///
+    //эти две строки добавлены из библиотеки
+    static uint32_t GoodPktsCountResult; // need to latch the results
+    static uint32_t BadPktsCountResult; // need to latch the results
+//#endif
+
+
+    static volatile crsfPayloadLinkstatistics_s LinkStatistics; // Link Statisitics Stored as Struct
+    
+    static void Begin(); //setup timers etc
+    static void End(); //stop timers etc //добавлено из библиотеки
+
+
+    ///////////////////////////////////////////////////////////
+    //все 5 добавлены из библиотеки
+    static void GetDeviceInformation(uint8_t *frame, uint8_t fieldCount);
+    static void SetMspV2Request(uint8_t *frame, uint16_t function, uint8_t *payload, uint8_t payloadLength);
+    static void SetHeaderAndCrc(uint8_t *frame, uint8_t frameType, uint8_t frameSize, uint8_t destAddr);
+    static void SetExtendedHeaderAndCrc(uint8_t *frame, uint8_t frameType, uint8_t frameSize, uint8_t senderAddr, uint8_t destAddr);
+    static uint32_t VersionStrToU32(const char *verStr);
+    ///////////////////////////////////////////////////////////
+
+//#ifdef CRSF_TX_MODULE
+    //////////////////////////////////
+    //Добавлено из новой библиотеки все три
+    static bool IsArmed() { return CRSF_to_BIT(ChannelData[4]); } // AUX1
+    static void ICACHE_RAM_ATTR sendLinkStatisticsToTX();
+    static void ICACHE_RAM_ATTR sendTelemetryToTX(uint8_t *data);
+    //////////////////////////////////
+
+    void ICACHE_RAM_ATTR sendLinkStatisticsToFC();      //было в старой библиотеке
+    //void ICACHE_RAM_ATTR sendLinkStatisticsToTX();    //было в старой, но чуть выше повтор из новой
+
+
+    static void packetQueueExtended(uint8_t type, void *data, uint8_t len);
+
+
+
+    
+    ///////// Variables for OpenTX Syncing //////////////////////////
+    //раздел добавлен из новой библиотеки, однако ему требуются
+    //дополнительные параметры - файл "msp.h"   !!!!!!!!!!!
+    // #define OpenTXsyncPacketInterval 200 // in ms
+    // static void ICACHE_RAM_ATTR setSyncParams(int32_t PacketInterval);
+    // static void ICACHE_RAM_ATTR JustSentRFpacket();
+    // static void ICACHE_RAM_ATTR sendSyncPacketToTX();
+    // static void disableOpentxSync();
+    // static void enableOpentxSync();
+
+    // static void handleUARTin();
+
+    // static uint8_t getModelID() { return modelId; }
+
+    // static void GetMspMessage(uint8_t **data, uint8_t *len);
+    // static void UnlockMspMessage();
+    // static void AddMspMessage(const uint8_t length, uint8_t* data);
+    // static void AddMspMessage(mspPacket_t* packet);
+    // static void ResetMspQueue();
+    // static uint32_t OpenTXsyncLastSent;
+    // static uint8_t GetMaxPacketBytes() { return maxPacketBytes; }
+    // static uint32_t GetCurrentBaudRate() { return UARTrequestedBaud; }
+
+    // static uint32_t ICACHE_RAM_ATTR GetRCdataLastRecv();
+    // static void ICACHE_RAM_ATTR RcPacketToChannelsData();
+///////////////////////////////////////////////
+/////////////////////////////////////////////////
+
+//#endif
+
 
     static bool CRSFstate;
-    static bool CRSFstatePrev;
 
+
+    static volatile uint8_t ParameterUpdateData[2];
+    static bool firstboot;
+    static bool CRSFstatePrev;
     static uint8_t CSFR_TXpin_Module;
     static uint8_t CSFR_RXpin_Module;
-
     static uint8_t CSFR_TXpin_Recv;
     static uint8_t CSFR_RXpin_Recv;
 
     /////Variables/////
 
     static volatile crsf_channels_s PackedRCdataOut;            // RC data in packed format for output.
-    static volatile crsfPayloadLinkstatistics_s LinkStatistics; // Link Statisitics Stored as Struct
-
-    static void Begin(); //setup timers etc
-
+  
     static void ICACHE_RAM_ATTR duplex_set_RX();
     static void ICACHE_RAM_ATTR duplex_set_TX();
     static void ICACHE_RAM_ATTR duplex_set_HIGHZ();
@@ -315,8 +962,7 @@ public:
 #endif
 
     void ICACHE_RAM_ATTR sendRCFrameToFC();
-    void ICACHE_RAM_ATTR sendLinkStatisticsToFC();
-    void ICACHE_RAM_ATTR sendLinkStatisticsToTX();
+    
 
     //static void BuildRCPacket(crsf_addr_e addr = CRSF_ADDRESS_FLIGHT_CONTROLLER); //build packet to send to the FC
 
@@ -331,16 +977,51 @@ public:
 private:
     Stream *_dev;
 
+    static inBuffer_U inBuffer;     //добавлено из новой библиотеки
+
+
+//#if CRSF_TX_MODULE
+    /// UART Handling ///
     static volatile uint8_t SerialInPacketLen;   // length of the CRSF packet as measured
     static volatile uint8_t SerialInPacketPtr;   // index where we are reading/writing
-    static volatile uint8_t SerialInBuffer[100]; // max 64 bytes for CRSF packet serial buffer
-
-    static volatile uint8_t CRSFoutBuffer[CRSF_MAX_PACKET_LEN + 1]; //index 0 hold the length of the datapacket
-
-    static volatile bool ignoreSerialData; //since we get a copy of the serial data use this flag to know when to ignore it
     static volatile bool CRSFframeActive;  //since we get a copy of the serial data use this flag to know when to ignore it
+    
+    ///всё добавлено из новой библиотеки
+    ////////////////////////////////////////////////
+    static uint32_t GoodPktsCount;
+    static uint32_t BadPktsCount;
+    static uint32_t UARTwdtLastChecked;
+    static uint8_t maxPacketBytes;
+    static uint8_t maxPeriodBytes;
+    static uint32_t TxToHandsetBauds[7];
+    static uint8_t UARTcurrentBaudIdx;
+    static uint32_t UARTrequestedBaud;
+    static uint8_t MspData[ELRS_MSP_BUFFER];
+    static uint8_t MspDataLength;
+    //#if defined(PLATFORM_ESP32)
+        static bool UARTinverted;
+    //#endif
+    static void ICACHE_RAM_ATTR adjustMaxPacketSize();
+    static void handleUARTout();
+    static bool UARTwdt();
+    static uint32_t autobaud();
+    static void flush_port_input(void);
+    
+    //конец добавленного сектора
+    //////////////////////////////////////////////
+    /////////////////////////////////////////////
+    
+    
+    static volatile uint8_t SerialInBuffer[100]; // max 64 bytes for CRSF packet serial buffer
+    static volatile uint8_t CRSFoutBuffer[CRSF_MAX_PACKET_LEN + 1]; //index 0 hold the length of the datapacket
+    static volatile bool ignoreSerialData; //since we get a copy of the serial data use this flag to know when to ignore it
+
+//#endif
+
 };
 
 //float fmap(float x, float in_min, float in_max, float out_min, float out_max);
+
+extern GENERIC_CRC8 crsf_crc;
 
 #endif
