@@ -19,7 +19,7 @@
 
 #define PACKED __attribute__((packed))
 
-
+#define ARRAY_SIZE(a) (sizeof(a) / sizeof(a[0]))
 
 #define CRSF_CRC_POLY 0xd5              //??? - это из библиотеки для ЛРС
 
@@ -59,6 +59,9 @@
 #define CRSF_MSP_REQ_PAYLOAD_SIZE 8
 #define CRSF_MSP_RESP_PAYLOAD_SIZE 58
 #define CRSF_MSP_MAX_PAYLOAD_SIZE (CRSF_MSP_REQ_PAYLOAD_SIZE > CRSF_MSP_RESP_PAYLOAD_SIZE ? CRSF_MSP_REQ_PAYLOAD_SIZE : CRSF_MSP_RESP_PAYLOAD_SIZE)
+
+
+
 
 
 
@@ -1002,7 +1005,7 @@ private:
         static bool UARTinverted;
     //#endif
     static void ICACHE_RAM_ATTR adjustMaxPacketSize();
-    static void handleUARTout();
+    //static void handleUARTout();
     static bool UARTwdt();
     static uint32_t autobaud();
     static void flush_port_input(void);
