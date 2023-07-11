@@ -9,10 +9,6 @@ bool uartCRSFinverted = false;
 
 CRSF crsf;
 
-#define CRSF_CHANNEL_VALUE_MIN 172
-#define CRSF_CHANNEL_VALUE_MID 992
-#define CRSF_CHANNEL_VALUE_MAX 1811
-
 hw_timer_t * timer = NULL;                              //таймер. указатель на переменную типа hw_timer_t 
 portMUX_TYPE timerMux = portMUX_INITIALIZER_UNLOCKED;   //переменная типа portMUX_TYPE, для обеспечения синхронизации между основным циклом и ISR при изменении общей переменной.
 
@@ -94,9 +90,10 @@ void StartTimer(uint8_t timer_number, uint16_t prescaler, bool flag) {
 
 
 void setup() {
-  // put your setup code here, to run once:
-  crsf.Begin();
+  
+  crsf.Begin();   //Инициализируем порт протокола передачи CRSF
 
+  //Определяем пин 0 для кнопки
   gpio_set_direction(GPIO_NUM_0, GPIO_MODE_INPUT);
   gpio_set_pull_mode(GPIO_NUM_0, GPIO_PULLUP_ONLY);
   
@@ -107,6 +104,18 @@ void setup() {
   crsf.PackedRCdataOut.ch2 = CRSF_CHANNEL_VALUE_MIN;
   crsf.PackedRCdataOut.ch3 = CRSF_CHANNEL_VALUE_MIN;
   crsf.PackedRCdataOut.ch4 = CRSF_CHANNEL_VALUE_MIN;
+  crsf.PackedRCdataOut.ch5 = CRSF_CHANNEL_VALUE_MIN;
+  crsf.PackedRCdataOut.ch6 = CRSF_CHANNEL_VALUE_MIN;
+  crsf.PackedRCdataOut.ch7 = CRSF_CHANNEL_VALUE_MIN;
+  crsf.PackedRCdataOut.ch8 = CRSF_CHANNEL_VALUE_MIN;
+  crsf.PackedRCdataOut.ch9 = CRSF_CHANNEL_VALUE_MIN;
+  crsf.PackedRCdataOut.ch10 = CRSF_CHANNEL_VALUE_MIN;
+  crsf.PackedRCdataOut.ch11 = CRSF_CHANNEL_VALUE_MIN;
+  crsf.PackedRCdataOut.ch12 = CRSF_CHANNEL_VALUE_MIN;
+  crsf.PackedRCdataOut.ch13 = CRSF_CHANNEL_VALUE_MIN;
+  crsf.PackedRCdataOut.ch14 = CRSF_CHANNEL_VALUE_MIN;
+  crsf.PackedRCdataOut.ch15 = CRSF_CHANNEL_VALUE_MIN;
+
   crsf.sendRCFrameToFC();
 
   StartTimer(0, 80, true);

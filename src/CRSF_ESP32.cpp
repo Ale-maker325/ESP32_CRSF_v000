@@ -2,18 +2,90 @@
 #include <Arduino.h>
 #include "HardwareSerial.h"
 
-HardwareSerial SerialPort(2);
-HardwareSerial CRSF::Port = SerialPort;
+HardwareSerial SerialPort(2);               //Инициализируем Serial 2 (в ESP32 это пины 16, 17)
+HardwareSerial CRSF::Port = SerialPort;     //Присваиваем встроенному в класс порту инициализируемый порт SerialPort(2)
 
-uint8_t CRSF::CSFR_TXpin_Module = 17;
-uint8_t CRSF::CSFR_RXpin_Module = 16;
+uint8_t CRSF::CSFR_TXpin_Module = 17;       //определяем пин TX
+uint8_t CRSF::CSFR_RXpin_Module = 16;       //определяем пин RX
 
-//U1RXD_IN_IDX
-//U1TXD_OUT_IDX
+/**
+ * Инициализируем работу класса CRSF путём вызова внутри метода инициализации порта Serial:
+ * 
+ * Port.begin(CRSF_RX_BAUDRATE, SERIAL_8N1, CSFR_RXpin_Module, CSFR_TXpin_Module, false);
+ * 
+ * где:
+ * 
+ *  CRSF_RX_BAUDRATE - задаём скорость работы порта CRSF_RX_BAUDRATE = 420000 в бодах (бит в секунду);
+ * 
+ *  SERIAL_8N1 - настроить количество бит данных, проверку четности и стоповые биты. По умолчанию,
+ *    посылка состоит из 8 бит данных, без проверки четности, с одним стоповым битом;
+ * 
+ *  CSFR_RXpin_Module - задаём пин пин RX;
+ * 
+ *  CSFR_TXpin_Module - задаём пин пин TX;
+ * 
+ *  false/true - задаём инвертирован ли порт или нет. В данном случае установлено значение false;
+*/
+void CRSF::Begin()
+{
+  CRSF::Port.begin(CRSF_RX_BAUDRATE, SERIAL_8N1, CSFR_RXpin_Module, CSFR_TXpin_Module, false);
+}
+
+
+volatile crsf_channels_s CRSF::PackedRCdataOut; //экземпляр структуры со значениями для каждого канала для отправки
+
+
+
+/**
+ * Метод, производящий отправку данных из структуры, хранящей значения для каналов (PackedRCdataOut в данном
+ * случае) в сериал порт в виде байтов.
+*/
+void ICACHE_RAM_ATTR CRSF::sendRCFrameToFC()
+{   
+    //буфер для записи байт в сериал порт.
+    uint8_t outBuffer[RCframeLength + 4] = {0};
+
+    outBuffer[0] = CRSF_ADDRESS_FLIGHT_CONTROLLER;      //Первым в буфер идёт адрес...??? Header
+    outBuffer[1] = RCframeLength + 2;                   //length of type (24) + payload + crc
+    outBuffer[2] = CRSF_FRAMETYPE_RC_CHANNELS_PACKED;   //Тип фрейма ??????
+
+    /**
+     * функция стандартной библиотеки языка программирования Си, копирующая содержимое одной области памяти в другую.
+     * Функция определена в заголовочном файле string.h (а также в mem.h), описывается в стандартах ANSI C и POSIX.
+     * 
+     *      void *memcpy(void *dst, const void *src, size_t n);
+     * где:
+     * 
+     *      dst — адрес буфера назначения
+     *      srс — адрес источника
+     *      n — количество байт для копирования
+     * 
+     * Функция копирует n байт из области памяти, на которую указывает src, в область памяти, на которую указывает dst.
+     * Функция возвращает адрес назначения dst.
+    */
+    memcpy(outBuffer + 3, (byte *)&PackedRCdataOut, RCframeLength);
+
+    uint8_t crc = CalcCRC(&outBuffer[2], RCframeLength + 1);
+
+    outBuffer[RCframeLength + 3] = crc;
+
+    CRSF::Port.write(outBuffer, RCframeLength + 4);
+}
+
+
+
+
+
+
+
+
+
+
+
 
 
 volatile bool CRSF::ignoreSerialData = false;
-volatile bool CRSF::CRSFframeActive = false; //since we get a copy of the serial data use this flag to know when to ignore it
+volatile bool CRSF::CRSFframeActive = false; //поскольку мы получаем копию серийных данных, используйте этот флаг, чтобы знать, когда его игнорировать
 
 void inline CRSF::nullCallback(void) {};
 
@@ -39,15 +111,16 @@ volatile uint16_t CRSF::ChannelDataInPrev[16] = {0};
 
 volatile uint8_t CRSF::ParameterUpdateData[2] = {0};
 
-volatile crsf_channels_s CRSF::PackedRCdataOut;
+
 volatile crsfPayloadLinkstatistics_s CRSF::LinkStatistics;
 
 //CRSF::CRSF(HardwareSerial &serial) : CRSF_SERIAL(serial){};
 
-void CRSF::Begin()
-{
-  CRSF::Port.begin(CRSF_RX_BAUDRATE, SERIAL_8N1, CSFR_RXpin_Module, CSFR_TXpin_Module, false);
-}
+
+
+
+
+
 
 void ICACHE_RAM_ATTR CRSF::sendLinkStatisticsToFC()
 {
@@ -69,22 +142,7 @@ void ICACHE_RAM_ATTR CRSF::sendLinkStatisticsToFC()
 
 
 
-void ICACHE_RAM_ATTR CRSF::sendRCFrameToFC()
-{
-  uint8_t outBuffer[RCframeLength + 4] = {0};
 
-  outBuffer[0] = CRSF_ADDRESS_FLIGHT_CONTROLLER;
-  outBuffer[1] = RCframeLength + 2;
-  outBuffer[2] = CRSF_FRAMETYPE_RC_CHANNELS_PACKED;
-
-  memcpy(outBuffer + 3, (byte *)&PackedRCdataOut, RCframeLength);
-
-  uint8_t crc = CalcCRC(&outBuffer[2], RCframeLength + 1);
-
-  outBuffer[RCframeLength + 3] = crc;
-
-  CRSF::Port.write(outBuffer, RCframeLength + 4);
-}
 
 
 
