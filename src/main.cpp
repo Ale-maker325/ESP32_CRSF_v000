@@ -83,19 +83,38 @@ void StartTimer(uint8_t timer_number, uint16_t prescaler, bool flag) {
 
 
 
-
-
+uint8_t ButtonPin = GPIO_NUM_4;
+uint8_t VrxPin = GPIO_NUM_34;
+uint8_t VryPin = GPIO_NUM_32;
 
 
 
 
 void setup() {
+  Serial.begin(9600);
   
   crsf.Begin();   //Инициализируем порт протокола передачи CRSF
 
   //Определяем пин 0 для кнопки
   gpio_set_direction(GPIO_NUM_0, GPIO_MODE_INPUT);
   gpio_set_pull_mode(GPIO_NUM_0, GPIO_PULLUP_ONLY);
+
+  //Определяем пины для аналогового чтения и для кнопки джойстика
+  
+  // пин кнопки SW
+  pinMode(ButtonPin, INPUT_PULLUP);
+  //gpio_set_direction(ButtonPin, GPIO_MODE_INPUT); 
+  //gpio_set_pull_mode(ButtonPin, GPIO_PULLUP_ONLY);
+
+  // пин аналоговый Vry
+  pinMode(VryPin, INPUT);
+  //gpio_set_direction(GPIO_NUM_32, GPIO_MODE_INPUT); 
+  //gpio_set_pull_mode(GPIO_NUM_32, GPIO_PULLUP_ONLY);
+
+  // пин аналоговый Vrx
+  pinMode(VrxPin, INPUT);
+  //gpio_set_direction(GPIO_NUM_34, GPIO_MODE_INPUT); 
+  //gpio_set_pull_mode(GPIO_NUM_34, GPIO_PULLUP_ONLY);
   
   //pinMode(0, INPUT_PULLUP);
 
@@ -126,13 +145,45 @@ void setup() {
 
 
 
-
+int X_pin = 0;
+int Y_pin = 0;
+int X_pin_old = 0;
+int Y_pin_old = 0;
+int Button_state = 0;
 
 
 void loop() {
   // put your main code here, to run repeatedly:
-  delay(1);
+  delay(400);
 
+  X_pin = map(analogRead(VrxPin), 0, 4095, CRSF_CHANNEL_VALUE_MIN, CRSF_CHANNEL_VALUE_MAX);
+  Y_pin = map(analogRead(VryPin), 0, 4095, CRSF_CHANNEL_VALUE_MIN, CRSF_CHANNEL_VALUE_MAX);
+  //X_pin = map(analogRead(VrxPin), 0, 4095, 0, 100);
+  //Y_pin = map(analogRead(VryPin), 0, 4095, 0, 100);
+   
+  if(digitalRead(ButtonPin) != 0)
+  {
+    Button_state = true;
+    Serial.print("Кнопка нажата!!!!");
+    Serial.println(" ");
+  }else{
+    Button_state = false;
+    Serial.print("Кнопка ненажата");
+    Serial.println(" ");
+  }
+
+    
+  if(X_pin != X_pin_old){
+    Serial.print("По оси Х = ");
+    Serial.println(X_pin);
+    Serial.println(" ");
+  }
+
+  if(Y_pin != Y_pin_old){
+    Serial.print("По оси Y = ");
+    Serial.println(Y_pin);
+    Serial.println(" ");
+  }
   
   if (digitalRead(0)) {
     crsf.PackedRCdataOut.ch4 = CRSF_CHANNEL_VALUE_MIN;
@@ -143,5 +194,9 @@ void loop() {
   crsf.PackedRCdataOut.ch1 = random(CRSF_CHANNEL_VALUE_MIN, CRSF_CHANNEL_VALUE_MAX);
   crsf.PackedRCdataOut.ch2 = CRSF_CHANNEL_VALUE_MIN;
   crsf.PackedRCdataOut.ch3 = random(CRSF_CHANNEL_VALUE_MIN, CRSF_CHANNEL_VALUE_MAX);
+
+
+  X_pin_old = X_pin;
+  Y_pin_old = Y_pin;
 
 }
