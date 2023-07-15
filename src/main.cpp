@@ -145,6 +145,70 @@ void setup() {
 
 
 
+
+#define NUM_READ 10  // порядок медианы
+
+// медиана на N значений со своим буфером, ускоренный вариант
+int find_X_analogData(int newVal) {
+  static int buffer[NUM_READ];  // статический буфер
+  static byte count = 0;
+  buffer[count] = newVal;
+  if ((count < NUM_READ - 1) and (buffer[count] > buffer[count + 1])) {
+    for (int i = count; i < NUM_READ - 1; i++) {
+      if (buffer[i] > buffer[i + 1]) {
+        int buff = buffer[i];
+        buffer[i] = buffer[i + 1];
+        buffer[i + 1] = buff;
+      }
+    }
+  } else {
+    if ((count > 0) and (buffer[count - 1] > buffer[count])) {
+      for (int i = count; i > 0; i--) {
+        if (buffer[i] < buffer[i - 1]) {
+          int buff = buffer[i];
+          buffer[i] = buffer[i - 1];
+          buffer[i - 1] = buff;
+        }
+      }
+    }
+  }
+  if (++count >= NUM_READ) count = 0;
+  return buffer[(int)NUM_READ / 2];
+}
+
+
+// медиана на N значений со своим буфером, ускоренный вариант
+int find_Y_analogData(int newVal) {
+  static int buffer[NUM_READ];  // статический буфер
+  static byte count = 0;
+  buffer[count] = newVal;
+  if ((count < NUM_READ - 1) and (buffer[count] > buffer[count + 1])) {
+    for (int i = count; i < NUM_READ - 1; i++) {
+      if (buffer[i] > buffer[i + 1]) {
+        int buff = buffer[i];
+        buffer[i] = buffer[i + 1];
+        buffer[i + 1] = buff;
+      }
+    }
+  } else {
+    if ((count > 0) and (buffer[count - 1] > buffer[count])) {
+      for (int i = count; i > 0; i--) {
+        if (buffer[i] < buffer[i - 1]) {
+          int buff = buffer[i];
+          buffer[i] = buffer[i - 1];
+          buffer[i - 1] = buff;
+        }
+      }
+    }
+  }
+  if (++count >= NUM_READ) count = 0;
+  return buffer[(int)NUM_READ / 2];
+}
+
+
+
+
+
 int X_pin = 0;
 int Y_pin = 0;
 int X_pin_old = 0;
@@ -154,21 +218,24 @@ int Button_state = 0;
 
 void loop() {
   // put your main code here, to run repeatedly:
-  delay(400);
+  delay(1);
 
   X_pin = map(analogRead(VrxPin), 0, 4095, CRSF_CHANNEL_VALUE_MIN, CRSF_CHANNEL_VALUE_MAX);
+  X_pin = find_X_analogData(X_pin);
+
   Y_pin = map(analogRead(VryPin), 0, 4095, CRSF_CHANNEL_VALUE_MIN, CRSF_CHANNEL_VALUE_MAX);
+  Y_pin = find_Y_analogData(Y_pin);
   //X_pin = map(analogRead(VrxPin), 0, 4095, 0, 100);
   //Y_pin = map(analogRead(VryPin), 0, 4095, 0, 100);
    
   if(digitalRead(ButtonPin) != 0)
   {
-    Button_state = true;
-    Serial.print("Кнопка нажата!!!!");
-    Serial.println(" ");
-  }else{
     Button_state = false;
     Serial.print("Кнопка ненажата");
+    Serial.println(" ");
+  }else{
+    Button_state = true;
+    Serial.print("Кнопка нажата!!!!");
     Serial.println(" ");
   }
 
@@ -185,15 +252,17 @@ void loop() {
     Serial.println(" ");
   }
   
-  if (digitalRead(0)) {
-    crsf.PackedRCdataOut.ch4 = CRSF_CHANNEL_VALUE_MIN;
-  } else {
+  if (Button_state) {
     crsf.PackedRCdataOut.ch4 = CRSF_CHANNEL_VALUE_MAX;
+  } else {
+
+    crsf.PackedRCdataOut.ch4 = CRSF_CHANNEL_VALUE_MIN;
   }
-  crsf.PackedRCdataOut.ch0 = random(CRSF_CHANNEL_VALUE_MIN, CRSF_CHANNEL_VALUE_MAX);
-  crsf.PackedRCdataOut.ch1 = random(CRSF_CHANNEL_VALUE_MIN, CRSF_CHANNEL_VALUE_MAX);
-  crsf.PackedRCdataOut.ch2 = CRSF_CHANNEL_VALUE_MIN;
-  crsf.PackedRCdataOut.ch3 = random(CRSF_CHANNEL_VALUE_MIN, CRSF_CHANNEL_VALUE_MAX);
+
+  crsf.PackedRCdataOut.ch0 = X_pin;
+  crsf.PackedRCdataOut.ch1 = Y_pin;
+  // crsf.PackedRCdataOut.ch2 = CRSF_CHANNEL_VALUE_MIN;
+  // crsf.PackedRCdataOut.ch3 = random(CRSF_CHANNEL_VALUE_MIN, CRSF_CHANNEL_VALUE_MAX);
 
 
   X_pin_old = X_pin;
