@@ -7,8 +7,6 @@
 //#define DEBUG_PRINT
 
 
-
-
 uint64_t CRSFinterval = 5000; //Значение счётчика, при котором будет сгенерировано прерывание в ms
 bool uartCRSFinverted = false;
 
@@ -22,13 +20,16 @@ portMUX_TYPE timerMux = portMUX_INITIALIZER_UNLOCKED;   //переменная �
 volatile int interruptCounter;
 
 
-const uint8_t Throttlte = GPIO_NUM_32;    //Пин Throttle
+const uint8_t Throttlte = GPIO_NUM_34;    //Пин Throttle
 const uint8_t Roll = GPIO_NUM_33;         //Пин Roll
-const uint8_t Yaw = GPIO_NUM_34;          //Пин Yaw
+const uint8_t Yaw = GPIO_NUM_32;          //Пин Yaw
 const uint8_t Pitch = GPIO_NUM_35;        //Пин Pitch
 
 
-
+// const uint8_t Throttlte = GPIO_NUM_34;    //Пин Throttle
+// const uint8_t Roll = GPIO_NUM_33;         //Пин Roll
+// const uint8_t Yaw = GPIO_NUM_32;          //Пин Yaw
+// const uint8_t Pitch = GPIO_NUM_35;        //Пин Pitch
 
 
 /**
