@@ -4,7 +4,7 @@
 #include <driver\gpio.h>
 
 //Директива для отладочной печати
-//#define DEBUG_PRINT
+#define DEBUG_PRINT
 
 
 uint64_t CRSFinterval = 5000; //Значение счётчика, при котором будет сгенерировано прерывание в ms
@@ -242,6 +242,8 @@ void getAnalogData()
   crsf.PackedRCdataOut.ch1 = filter_Data.buffer_Pitch[(uint32_t)NUM_READ / 2];
   crsf.PackedRCdataOut.ch2 = filter_Data.buffer_Yaw[(uint32_t)NUM_READ / 2];
   crsf.PackedRCdataOut.ch3 = filter_Data.buffer_Roll[(uint32_t)NUM_READ / 2];
+  crsf.PackedRCdataOut.ch4 = 0x00;
+  crsf.PackedRCdataOut.ch5 = 0x00;
 
 }
 
@@ -328,18 +330,36 @@ void setup() {
   crsf.PackedRCdataOut.ch1 = CRSF_CHANNEL_VALUE_MIN;
   crsf.PackedRCdataOut.ch2 = CRSF_CHANNEL_VALUE_MIN;
   crsf.PackedRCdataOut.ch3 = CRSF_CHANNEL_VALUE_MIN;
-  crsf.PackedRCdataOut.ch4 = CRSF_CHANNEL_VALUE_MIN;
-  crsf.PackedRCdataOut.ch5 = CRSF_CHANNEL_VALUE_MIN;
-  crsf.PackedRCdataOut.ch6 = CRSF_CHANNEL_VALUE_MIN;
-  crsf.PackedRCdataOut.ch7 = CRSF_CHANNEL_VALUE_MIN;
-  crsf.PackedRCdataOut.ch8 = CRSF_CHANNEL_VALUE_MIN;
-  crsf.PackedRCdataOut.ch9 = CRSF_CHANNEL_VALUE_MIN;
-  crsf.PackedRCdataOut.ch10 = CRSF_CHANNEL_VALUE_MIN;
-  crsf.PackedRCdataOut.ch11 = CRSF_CHANNEL_VALUE_MIN;
-  crsf.PackedRCdataOut.ch12 = CRSF_CHANNEL_VALUE_MIN;
-  crsf.PackedRCdataOut.ch13 = CRSF_CHANNEL_VALUE_MIN;
-  crsf.PackedRCdataOut.ch14 = CRSF_CHANNEL_VALUE_MIN;
-  crsf.PackedRCdataOut.ch15 = CRSF_CHANNEL_VALUE_MIN;
+  
+  #ifdef DEBUG_PRINT
+    crsf.PackedRCdataOut.ch4 = 0x00;
+    crsf.PackedRCdataOut.ch5 = 0x00;
+    crsf.PackedRCdataOut.ch6 = 0x00;
+    crsf.PackedRCdataOut.ch7 = 0x00;
+    crsf.PackedRCdataOut.ch8 = 0x00;
+    crsf.PackedRCdataOut.ch9 = 0x00;
+    crsf.PackedRCdataOut.ch10 = 0x00;
+    crsf.PackedRCdataOut.ch11 = 0x00;
+    crsf.PackedRCdataOut.ch12 = 0x00;
+    crsf.PackedRCdataOut.ch13 = 0x00;
+    crsf.PackedRCdataOut.ch14 = 0x00;
+    crsf.PackedRCdataOut.ch15 = 0x00;
+  #else 
+    crsf.PackedRCdataOut.ch4 = CRSF_CHANNEL_VALUE_MIN;
+    crsf.PackedRCdataOut.ch5 = CRSF_CHANNEL_VALUE_MIN;
+    crsf.PackedRCdataOut.ch6 = CRSF_CHANNEL_VALUE_MIN;
+    crsf.PackedRCdataOut.ch7 = CRSF_CHANNEL_VALUE_MIN;
+    crsf.PackedRCdataOut.ch8 = CRSF_CHANNEL_VALUE_MIN;
+    crsf.PackedRCdataOut.ch9 = CRSF_CHANNEL_VALUE_MIN;
+    crsf.PackedRCdataOut.ch10 = CRSF_CHANNEL_VALUE_MIN;
+    crsf.PackedRCdataOut.ch11 = CRSF_CHANNEL_VALUE_MIN;
+    crsf.PackedRCdataOut.ch12 = CRSF_CHANNEL_VALUE_MIN;
+    crsf.PackedRCdataOut.ch13 = CRSF_CHANNEL_VALUE_MIN;
+    crsf.PackedRCdataOut.ch14 = CRSF_CHANNEL_VALUE_MIN;
+    crsf.PackedRCdataOut.ch15 = CRSF_CHANNEL_VALUE_MIN;
+
+  #endif
+  
 
   crsf.sendRCFrameToFC();
 
@@ -368,5 +388,7 @@ void loop() {
   #ifdef DEBUG_PRINT
     print_debug();
   #endif
+
+  
   
 }

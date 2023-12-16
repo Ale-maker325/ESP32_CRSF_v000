@@ -46,6 +46,7 @@ void ICACHE_RAM_ATTR CRSF::sendRCFrameToFC()
     uint8_t outBuffer[RCframeLength + 4] = {0};
 
     outBuffer[0] = CRSF_ADDRESS_FLIGHT_CONTROLLER;      //Первым в буфер идёт адрес...??? Header
+    //outBuffer[0] = CRSF_ADDRESS_CRSF_TRANSMITTER;      //Первым в буфер идёт адрес...??? Header
     outBuffer[1] = RCframeLength + 2;                   //length of type (24) + payload + crc
     outBuffer[2] = CRSF_FRAMETYPE_RC_CHANNELS_PACKED;   //Тип фрейма ??????
 
