@@ -4,7 +4,7 @@
 #include <driver\gpio.h>
 
 //Директива для отладочной печати
-#define DEBUG_PRINT
+//#define DEBUG_PRINT
 
 
 uint64_t CRSFinterval = 5000; //Значение счётчика, при котором будет сгенерировано прерывание в ms
