@@ -1,9 +1,9 @@
-#pragma once
+#ifndef __crc_____
+#define __crc_____
+
+
 #include <stdint.h>
 #include "targets.h"
-
-//#undef ICACHE_RAM_ATTR //fix to allow both esp32 and esp8266 to use ICACHE_RAM_ATTR for mapping to IRAM
-//#define ICACHE_RAM_ATTR IRAM_ATTR
 
 #define crclen 256
 
@@ -31,3 +31,6 @@ public:
     void init(uint8_t bits, uint16_t poly);
     uint16_t calc(uint8_t *data, uint8_t len, uint16_t crc);
 };
+
+
+#endif
