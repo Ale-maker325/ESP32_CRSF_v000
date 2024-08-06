@@ -6,7 +6,7 @@
 #include <OneButton.h>
 
 //Директива для отладочной печати - раскомментировать если нужно, но тогда всё будет сильно тормозить
-//#define DEBUG_PRINT
+#define DEBUG_PRINT
 //Директива (пока что временно!) переключения в режим работы с сериал и кнопкой
 #define BUTTON_MODE
 
@@ -96,9 +96,30 @@ void StartTimer(uint8_t timer_number, uint16_t prescaler, bool flag) {
 
   // Мы заканчиваем нашу функцию настройки, включив таймер вызовом функции timerAlarmEnable , передав в качестве
   // входных данных нашу переменную таймера.
-  timerAlarmEnable(timer);
+  //timerAlarmEnable(timer); //- включается кнопкой в прерывании от кнопки
+  timerAlarmDisable(timer); //- временно отключим таймер
 }
 
+
+void firstInitAnalogDataForChannels()
+{
+  crsf.PackedRCdataOut.ch0 = CRSF_CHANNEL_VALUE_MIN;
+  crsf.PackedRCdataOut.ch1 = CRSF_CHANNEL_VALUE_MIN;
+  crsf.PackedRCdataOut.ch2 = CRSF_CHANNEL_VALUE_MIN;
+  crsf.PackedRCdataOut.ch3 = CRSF_CHANNEL_VALUE_MIN;
+  crsf.PackedRCdataOut.ch4 = 0x00;
+  crsf.PackedRCdataOut.ch5 = 0x00;
+  crsf.PackedRCdataOut.ch6 = 0x00;
+  crsf.PackedRCdataOut.ch7 = 0x00;
+  crsf.PackedRCdataOut.ch8 = 0x00;
+  crsf.PackedRCdataOut.ch9 = 0x00;
+  crsf.PackedRCdataOut.ch10 = 0x00;
+  crsf.PackedRCdataOut.ch11 = 0x00;
+  crsf.PackedRCdataOut.ch12 = 0x00;
+  crsf.PackedRCdataOut.ch13 = 0x00;
+  crsf.PackedRCdataOut.ch14 = 0x00;
+  crsf.PackedRCdataOut.ch15 = 0x00;
+}
 
 
 
@@ -109,25 +130,33 @@ volatile static bool flagButtonOnePressed = false;
 volatile static uint8_t typePacket = CRSF_FRAMETYPE_DEVICE_PING;
 volatile static bool flagButtonTwoPressed = false;
 
+/**
+ * @brief Функция для обработчика прерываний по нажатию
+ * кнопки. Включает генерацию протокола CRSF в сериал порт
+ * по прерываниям таймера.
+ */
 void IRAM_ATTR clickButton()
 {
-  #ifdef DEBUG_PRINT
-    Serial.println(" ");
-    Serial.println("Button is clicked!");
-  #endif
   flagButtonOnePressed = true;
   flagButtonTwoPressed = false;
+  #ifdef DEBUG_PRINT
+    log_e("Короткое нажатие кнопки - генерация CRSF");
+  #endif
+  timerAlarmEnable(timer);  //Включаем генерацию протокола по таймеру
 }
 
-
-void IRAM_ATTR doubleClickButton()
+/**
+ * @brief 
+ * 
+ */
+void IRAM_ATTR LongPressButton()
 {
   #ifdef DEBUG_PRINT
-    Serial.println(" ");
-    Serial.println("Button is 2 x clicked!");
+    log_e("Долгое нажатие - стоп генерации CRSF");
   #endif
   flagButtonOnePressed = false;
   flagButtonTwoPressed = true;
+  timerAlarmDisable(timer); //Отключаем генерацию протокола по таймеру
 }
 
 
@@ -137,65 +166,34 @@ void IRAM_ATTR doubleClickButton()
 
 
 void setup() {
-  //Serial.begin(9600);
+  Serial.begin(9600);
   
   crsf.Begin();   //Инициализируем порт протокола передачи CRSF
 
-  #ifdef DEBUG_PRINT
-    Serial.println("crsf.Begin()");
-  #endif
-
-  //Определяем пин 0 для кнопки чтобы подать команду перехода на вайфай
+  /**
+   * @brief Инициируем кнопку с подключением к пину 0. Кнопка срабатывает при подтяжке
+   * её к земле. Назначаем одно нажатие - для генерации протокола CRSF. 
+   * 
+   */
   button.setup(ButtonPin, INPUT_PULLUP, true);
-  // link the doubleclick function to be called on a doubleclick event.
-  button.attachLongPressStart(clickButton);
-  // button.attachDoubleClick(doubleClickButton);
-  button.attachClick(doubleClickButton);
-
+  
   #ifdef DEBUG_PRINT
-    Serial.print("Button setup on pin ");
-    Serial.print(ButtonPin);
+    log_e("Назначаем кнопку на пин %u ", ButtonPin);
   #endif
   
-
-  //#ifndef BUTTON_MODE
-
-    pinMode(Throttlte, INPUT);
-    pinMode(Roll, INPUT);
-    pinMode(Yaw, INPUT);
-    pinMode(Pitch, INPUT);
-    
-    crsf.PackedRCdataOut.ch0 = CRSF_CHANNEL_VALUE_MIN;
-    crsf.PackedRCdataOut.ch1 = CRSF_CHANNEL_VALUE_MIN;
-    crsf.PackedRCdataOut.ch2 = CRSF_CHANNEL_VALUE_MIN;
-    crsf.PackedRCdataOut.ch3 = CRSF_CHANNEL_VALUE_MIN;
-    crsf.PackedRCdataOut.ch4 = 0x00;
-    crsf.PackedRCdataOut.ch5 = 0x00;
-    crsf.PackedRCdataOut.ch6 = 0x00;
-    crsf.PackedRCdataOut.ch7 = 0x00;
-    crsf.PackedRCdataOut.ch8 = 0x00;
-    crsf.PackedRCdataOut.ch9 = 0x00;
-    crsf.PackedRCdataOut.ch10 = 0x00;
-    crsf.PackedRCdataOut.ch11 = 0x00;
-    crsf.PackedRCdataOut.ch12 = 0x00;
-    crsf.PackedRCdataOut.ch13 = 0x00;
-    crsf.PackedRCdataOut.ch14 = 0x00;
-    crsf.PackedRCdataOut.ch15 = 0x00;
-    
-    crsf.sendFrameToFC();
-    log_e("Timer number %u exceeds available number of Timers.", 100000);
-    StartTimer(0, 80, true);
-
-    //Отладочная печать
-    #ifdef DEBUG_PRINT
-      //print_debug();
-    #endif
-  //#endif
-
-  #ifdef DEBUG_PRINT
-
-  #endif
+  button.attachClick(clickButton);
+  button.attachLongPressStart(LongPressButton);
   
+  pinMode(Throttlte, INPUT);
+  pinMode(Roll, INPUT);
+  pinMode(Yaw, INPUT);
+  pinMode(Pitch, INPUT);
+    
+  firstInitAnalogDataForChannels();
+  crsf.sendFrameToFC();
+  StartTimer(0, 80, true);
+
+ 
 }
 
 
@@ -204,43 +202,25 @@ void setup() {
 
 
 
-void loop() {
+void loop()
+{
+  getAnalogData(Throttlte, Roll, Yaw, Pitch, crsf);
+  button.tick();
   
-  //#ifndef BUTTON_MODE
-    getAnalogData(Throttlte, Roll, Yaw, Pitch, crsf);
+  if(flagButtonOnePressed)
+  {
+    
+  //   crsf.readFromSerial();
+  }
   
-    //Отладочная печать
-    #ifdef DEBUG_PRINT
-      //print_debug();
-    #endif
+  if(flagButtonTwoPressed)
+  {
+    
+    // crsf.sendExtendedPacket(typePacket);
+      
+    
+  }
 
-  //#endif
-
-  #ifdef BUTTON_MODE
-   button.tick();
-   if(flagButtonOnePressed)
-   {
-      crsf.readFromSerial();
-      //flagButtonTwoPressed = false;
-   }
 
     
-
-   if(flagButtonTwoPressed)
-   {
-      // crsf.sendExtendedPacket(typePacket);
-      
-      // #ifdef DEBUG_PRINT
-      //   Serial.print("Sends packet 0x");
-      //   Serial.println(typePacket, HEX);
-      // #endif
-
-      
-
-   }
-
-
-  //crsf.readFromSerial();
-  #endif
-  
 }
