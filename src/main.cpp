@@ -4,6 +4,7 @@
 #include <esp_log.h>
 #include <filterAnalogSignal.h>
 #include <OneButton.h>
+#include <LED_SIGNALS.h>
 
 //Директива для отладочной печати - раскомментировать если нужно, но тогда всё будет сильно тормозить
 #define DEBUG_PRINT
@@ -17,8 +18,10 @@ static const char *TAG_SYS = "SYS: ";
 uint64_t CRSFinterval = 5000; //Значение счётчика, при котором будет сгенерировано прерывание в ms
 bool uartCRSFinverted = false;
 
-CRSF crsf;          //Клас протокола CRSF
-OneButton button;   //Класс упраления кнопкой
+CRSF crsf;                    //Клас протокола CRSF
+OneButton button;             //Класс упраления кнопкой
+LED_SIGNAL led_StartCRSF;     //Светодиод, отвечающий за индикацию включения протокола CRSF
+LED_SIGNAL led_StopCRSF;      //Светодиод, отвечающий за индикацию выключения протокола CRSF
 
 
 portMUX_TYPE timerMux = portMUX_INITIALIZER_UNLOCKED;   //переменная типа portMUX_TYPE, для обеспечения синхронизации между основным циклом и ISR при изменении общей переменной.
@@ -35,7 +38,8 @@ const uint8_t Pitch =     GPIO_NUM_35;    //Пин Pitch
 
 const uint8_t ButtonPin = GPIO_NUM_0;     //Пин кнопки
 
-
+const uint8_t LED_CRSF_START = GPIO_NUM_25;   //Светодиод сигнализатор работы протокола CRSF 
+const uint8_t LED_CRSF_STOP  = GPIO_NUM_26;   //Светодиод сигнализатор остановки работы протокола CRSF
 
 
 
@@ -142,6 +146,8 @@ void IRAM_ATTR clickButton()
   #ifdef DEBUG_PRINT
     log_e("Короткое нажатие кнопки - генерация CRSF");
   #endif
+  led_StartCRSF.ledON();
+  led_StopCRSF.ledOFF();
   timerAlarmEnable(timer);  //Включаем генерацию протокола по таймеру
 }
 
@@ -157,6 +163,8 @@ void IRAM_ATTR LongPressButton()
   flagButtonOnePressed = false;
   flagButtonTwoPressed = true;
   timerAlarmDisable(timer); //Отключаем генерацию протокола по таймеру
+  led_StartCRSF.ledOFF();
+  led_StopCRSF.ledON();
 }
 
 
@@ -169,6 +177,9 @@ void setup() {
   Serial.begin(9600);
   
   crsf.Begin();   //Инициализируем порт протокола передачи CRSF
+  led_StartCRSF.initLed(LED_CRSF_START, false);
+  led_StopCRSF.initLed(LED_CRSF_STOP, true);
+
 
   /**
    * @brief Инициируем кнопку с подключением к пину 0. Кнопка срабатывает при подтяжке
