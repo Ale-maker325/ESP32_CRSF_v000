@@ -3,8 +3,22 @@
 
 #include <Arduino.h>
 
-#define GPIO_PIN_LED
-#define GPIO_LED_INVERTED 0
+
+#define PACKED __attribute__((packed))
+
+/**
+ * @brief Структура, которая будет хранить состояние кнопки и её
+ * свойства во время работы
+ * 
+ */
+struct BUTTON_PROPERTY 
+{
+    bool isInverted = false;
+    bool isON = false;
+    bool isOff = true;
+
+} PACKED;
+
 
 
 class LED_SIGNAL
@@ -15,7 +29,8 @@ class LED_SIGNAL
         void ICACHE_RAM_ATTR ledInvert();
         void ICACHE_RAM_ATTR ledON();
         void ICACHE_RAM_ATTR ledOFF();
-        
+
+        BUTTON_PROPERTY button_property;                
 
     private:
         uint8_t _led;

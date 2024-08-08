@@ -141,14 +141,17 @@ volatile static bool flagButtonTwoPressed = false;
  */
 void IRAM_ATTR clickButton()
 {
-  flagButtonOnePressed = true;
-  flagButtonTwoPressed = false;
-  #ifdef DEBUG_PRINT
-    log_e("Короткое нажатие кнопки - генерация CRSF");
-  #endif
-  led_StartCRSF.ledON();
-  led_StopCRSF.ledOFF();
-  timerAlarmEnable(timer);  //Включаем генерацию протокола по таймеру
+  if(flagButtonOnePressed != true)
+  {
+    flagButtonOnePressed = true;
+    flagButtonTwoPressed = false;
+    #ifdef DEBUG_PRINT
+      log_e("Короткое нажатие кнопки - генерация CRSF");
+    #endif
+    led_StartCRSF.ledON();
+    led_StopCRSF.ledOFF();
+    timerAlarmEnable(timer);  //Включаем генерацию протокола по таймеру
+  }
 }
 
 /**
@@ -157,14 +160,17 @@ void IRAM_ATTR clickButton()
  */
 void IRAM_ATTR LongPressButton()
 {
-  #ifdef DEBUG_PRINT
-    log_e("Долгое нажатие - стоп генерации CRSF");
-  #endif
-  flagButtonOnePressed = false;
-  flagButtonTwoPressed = true;
-  timerAlarmDisable(timer); //Отключаем генерацию протокола по таймеру
-  led_StartCRSF.ledOFF();
-  led_StopCRSF.ledON();
+  if(flagButtonTwoPressed != true)
+  {
+    #ifdef DEBUG_PRINT
+      log_e("Долгое нажатие - стоп генерации CRSF");
+    #endif
+    flagButtonOnePressed = false;
+    flagButtonTwoPressed = true;
+    timerAlarmDisable(timer); //Отключаем генерацию протокола по таймеру
+    led_StartCRSF.ledOFF();
+    led_StopCRSF.ledON();
+  }
 }
 
 
