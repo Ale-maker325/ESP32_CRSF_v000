@@ -19,9 +19,11 @@ uint64_t CRSFinterval = 5000; //Значение счётчика, при кот
 bool uartCRSFinverted = false;
 
 CRSF crsf;                    //Клас протокола CRSF
-OneButton button;             //Класс упраления кнопкой
+OneButton button_CRSF;        //Класс упраления кнопкой CRSF
+OneButton button_WiFi;        //Класс упраления кнопкой WiFi
 LED_SIGNAL led_StartCRSF;     //Светодиод, отвечающий за индикацию включения протокола CRSF
 LED_SIGNAL led_StopCRSF;      //Светодиод, отвечающий за индикацию выключения протокола CRSF
+LED_SIGNAL led_Start_WiFi;    //Светодиод, отвечающий за индикацию включения WiFi
 
 
 portMUX_TYPE timerMux = portMUX_INITIALIZER_UNLOCKED;   //переменная типа portMUX_TYPE, для обеспечения синхронизации между основным циклом и ISR при изменении общей переменной.
@@ -30,17 +32,23 @@ portMUX_TYPE timerMux = portMUX_INITIALIZER_UNLOCKED;   //переменная �
 //ее необходимо объявить с ключевым словом volatile , что позволит избежать ее удаления из-за оптимизации компилятора.
 volatile int interruptCounter;
 
+volatile static bool flagButtonOnePressed = false;
+volatile static uint8_t typePacket = CRSF_FRAMETYPE_DEVICE_PING;
+volatile static bool flagButtonTwoPressed = false;
+volatile static bool flagButtonWiFiPressed = false;
+
 
 const uint8_t Throttlte = GPIO_NUM_34;    //Пин Throttle
 const uint8_t Roll =      GPIO_NUM_33;    //Пин Roll
 const uint8_t Yaw =       GPIO_NUM_32;    //Пин Yaw
 const uint8_t Pitch =     GPIO_NUM_35;    //Пин Pitch
 
-const uint8_t ButtonPin = GPIO_NUM_0;     //Пин кнопки
+const uint8_t ButtonPin_CRSF = GPIO_NUM_0;     //Пин кнопки включения/отключения протокола CRSF
+const uint8_t ButtonPin_WiFi = GPIO_NUM_4;     //Пин кнопки включения команды WiFi
 
 const uint8_t LED_CRSF_START = GPIO_NUM_25;   //Светодиод сигнализатор работы протокола CRSF 
 const uint8_t LED_CRSF_STOP  = GPIO_NUM_26;   //Светодиод сигнализатор остановки работы протокола CRSF
-
+const uint8_t LED_CRSF_WiFi  = GPIO_NUM_27;   //Светодиод сигнализатор кнопки включения команды WiFi
 
 
 
@@ -130,26 +138,26 @@ void firstInitAnalogDataForChannels()
 
 
 
-volatile static bool flagButtonOnePressed = false;
-volatile static uint8_t typePacket = CRSF_FRAMETYPE_DEVICE_PING;
-volatile static bool flagButtonTwoPressed = false;
+
 
 /**
  * @brief Функция для обработчика прерываний по нажатию
  * кнопки. Включает генерацию протокола CRSF в сериал порт
  * по прерываниям таймера.
  */
-void IRAM_ATTR clickButton()
+void IRAM_ATTR clickButton_CRSF()
 {
   if(flagButtonOnePressed != true)
   {
     flagButtonOnePressed = true;
     flagButtonTwoPressed = false;
+    flagButtonWiFiPressed = false;
     #ifdef DEBUG_PRINT
       log_e("Короткое нажатие кнопки - генерация CRSF");
     #endif
     led_StartCRSF.ledON();
     led_StopCRSF.ledOFF();
+    led_Start_WiFi.ledOFF();
     timerAlarmEnable(timer);  //Включаем генерацию протокола по таймеру
   }
 }
@@ -158,7 +166,7 @@ void IRAM_ATTR clickButton()
  * @brief 
  * 
  */
-void IRAM_ATTR LongPressButton()
+void IRAM_ATTR LongPressButton_CRSF()
 {
   if(flagButtonTwoPressed != true)
   {
@@ -167,12 +175,34 @@ void IRAM_ATTR LongPressButton()
     #endif
     flagButtonOnePressed = false;
     flagButtonTwoPressed = true;
+    flagButtonWiFiPressed = false;
     timerAlarmDisable(timer); //Отключаем генерацию протокола по таймеру
     led_StartCRSF.ledOFF();
     led_StopCRSF.ledON();
+    led_Start_WiFi.ledOFF();
   }
 }
 
+/**
+ * @brief Функция для обработчика прерываний по нажатию
+ * кнопки. Включает WiFi.
+ */
+void IRAM_ATTR clickButton_WiFi()
+{
+  if(flagButtonWiFiPressed != true)
+  {
+    timerAlarmDisable(timer); //Отключаем генерацию протокола по таймеру
+    flagButtonOnePressed = false;
+    flagButtonTwoPressed = false;
+    flagButtonWiFiPressed = true;
+    #ifdef DEBUG_PRINT
+      log_e("Короткое нажатие кнопки - генерация WiFi");
+    #endif
+    led_StartCRSF.ledOFF();
+    led_StopCRSF.ledOFF();
+    led_Start_WiFi.ledON();
+  }
+}
 
 
 
@@ -185,6 +215,7 @@ void setup() {
   crsf.Begin();   //Инициализируем порт протокола передачи CRSF
   led_StartCRSF.initLed(LED_CRSF_START, false);
   led_StopCRSF.initLed(LED_CRSF_STOP, true);
+  led_Start_WiFi.initLed(LED_CRSF_WiFi, false);
 
 
   /**
@@ -192,14 +223,23 @@ void setup() {
    * её к земле. Назначаем одно нажатие - для генерации протокола CRSF. 
    * 
    */
-  button.setup(ButtonPin, INPUT_PULLUP, true);
+  button_CRSF.setup(ButtonPin_CRSF, INPUT_PULLUP, true);
   
   #ifdef DEBUG_PRINT
-    log_e("Назначаем кнопку на пин %u ", ButtonPin);
+    log_e("Назначаем кнопку CRSF на пин %u ", ButtonPin_CRSF);
   #endif
   
-  button.attachClick(clickButton);
-  button.attachLongPressStart(LongPressButton);
+  button_CRSF.attachClick(clickButton_CRSF);
+  button_CRSF.attachLongPressStart(LongPressButton_CRSF);
+
+  button_WiFi.setup(ButtonPin_WiFi, INPUT_PULLUP, true);
+
+  button_WiFi.attachClick(clickButton_WiFi);
+  //button_CRSF.attachLongPressStart(LongPressButton_WiFi);
+  
+  #ifdef DEBUG_PRINT
+    log_e("Назначаем кнопку WiFi на пин %u ", ButtonPin_WiFi);
+  #endif
   
   pinMode(Throttlte, INPUT);
   pinMode(Roll, INPUT);
@@ -222,7 +262,8 @@ void setup() {
 void loop()
 {
   getAnalogData(Throttlte, Roll, Yaw, Pitch, crsf);
-  button.tick();
+  button_CRSF.tick();
+  button_WiFi.tick();
   
   if(flagButtonOnePressed)
   {
