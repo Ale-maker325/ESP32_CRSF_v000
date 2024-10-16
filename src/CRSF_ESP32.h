@@ -311,6 +311,7 @@ public:
     void ICACHE_RAM_ATTR sendFrameToFC();
     void ICACHE_RAM_ATTR sendFrameToTR();
     void ICACHE_RAM_ATTR sendExtendedPacket(uint8_t typePacket);
+    void ICACHE_RAM_ATTR sendPacket();
     void ICACHE_RAM_ATTR readFromSerial();
 
     uint8_t inputBuffer[CRSF_MAX_PACKET_LEN + 1] = {0};       //Входной буффер - максимально 64 байта для пакетов CRSF

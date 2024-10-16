@@ -16,6 +16,7 @@ static const char *TAG_SYS = "SYS: ";
 
 
 uint64_t CRSFinterval = 5000; //Значение счётчика, при котором будет сгенерировано прерывание в ms
+uint64_t CRSFinterval_2 = 5000; //Значение счётчика, при котором будет сгенерировано прерывание в ms
 bool uartCRSFinverted = false;
 
 CRSF crsf;                    //Клас протокола CRSF
@@ -27,6 +28,7 @@ LED_SIGNAL led_Start_WiFi;    //Светодиод, отвечающий за и
 
 
 portMUX_TYPE timerMux = portMUX_INITIALIZER_UNLOCKED;   //переменная типа portMUX_TYPE, для обеспечения синхронизации между основным циклом и ISR при изменении общей переменной.
+portMUX_TYPE timerMux_2 = portMUX_INITIALIZER_UNLOCKED;   //переменная типа portMUX_TYPE, для обеспечения синхронизации между основным циклом и ISR при изменении общей переменной.
 
 //переменная-счетчик будет совместно использоваться основным циклом и ISR,
 //ее необходимо объявить с ключевым словом volatile , что позволит избежать ее удаления из-за оптимизации компилятора.
@@ -64,7 +66,25 @@ void IRAM_ATTR onTimer() {
 
 }
 
+
+
+/**
+ * Функция обработчик прерывания по таймеру, вызывающий с заданной периодичностью функцию отправки
+ * пакетов в сериал-порт
+*/
+void IRAM_ATTR onTimer_2() {
+  portENTER_CRITICAL_ISR(&timerMux_2);
+  crsf.sendPacket();
+  portEXIT_CRITICAL_ISR(&timerMux_2);
+
+}
+
+
+
+
+
 hw_timer_t * timer = NULL;                              //таймер. указатель на переменную типа hw_timer_t 
+hw_timer_t * timer_2 = NULL;                              //таймер. указатель на переменную типа hw_timer_t 
 
 /**
  * Функция инициализации таймера для периодичной отправки в порт пакетов
@@ -113,6 +133,26 @@ void StartTimer(uint8_t timer_number, uint16_t prescaler, bool flag) {
 }
 
 
+
+
+
+
+
+void StartTimer_2(uint8_t timer_number, uint16_t prescaler, bool flag) {
+  timer_2 = timerBegin(timer_number, prescaler, flag);
+  timerAttachInterrupt(timer_2, &onTimer_2, true);
+  timerAlarmWrite(timer_2, CRSFinterval_2, true);
+  timerAlarmDisable(timer_2); //- временно отключим таймер
+}
+
+
+
+
+
+
+
+
+
 void firstInitAnalogDataForChannels()
 {
   crsf.PackedRCdataOut.ch0 = CRSF_CHANNEL_VALUE_MIN;
@@ -158,7 +198,9 @@ void IRAM_ATTR clickButton_CRSF()
     led_StartCRSF.ledON();
     led_StopCRSF.ledOFF();
     led_Start_WiFi.ledOFF();
+
     timerAlarmEnable(timer);  //Включаем генерацию протокола по таймеру
+    timerAlarmDisable(timer_2); //Отключаем генерацию протокола по таймеру
   }
 }
 
@@ -176,10 +218,13 @@ void IRAM_ATTR LongPressButton_CRSF()
     flagButtonOnePressed = false;
     flagButtonTwoPressed = true;
     flagButtonWiFiPressed = false;
-    timerAlarmDisable(timer); //Отключаем генерацию протокола по таймеру
+
     led_StartCRSF.ledOFF();
     led_StopCRSF.ledON();
     led_Start_WiFi.ledOFF();
+
+    timerAlarmDisable(timer); //Отключаем генерацию протокола по таймеру
+    timerAlarmDisable(timer_2); //Отключаем генерацию протокола по таймеру
   }
 }
 
@@ -191,16 +236,20 @@ void IRAM_ATTR clickButton_WiFi()
 {
   if(flagButtonWiFiPressed != true)
   {
-    timerAlarmDisable(timer); //Отключаем генерацию протокола по таймеру
     flagButtonOnePressed = false;
     flagButtonTwoPressed = false;
     flagButtonWiFiPressed = true;
     #ifdef DEBUG_PRINT
       log_e("Короткое нажатие кнопки - генерация WiFi");
     #endif
+
     led_StartCRSF.ledOFF();
     led_StopCRSF.ledOFF();
     led_Start_WiFi.ledON();
+    // crsf.sendPacket();
+
+    timerAlarmDisable(timer); //Отключаем генерацию протокола по таймеру
+    timerAlarmEnable(timer_2);  //Включаем генерацию протокола по таймеру
   }
 }
 
@@ -213,6 +262,7 @@ void setup() {
   Serial.begin(9600);
   
   crsf.Begin();   //Инициализируем порт протокола передачи CRSF
+
   led_StartCRSF.initLed(LED_CRSF_START, false);
   led_StopCRSF.initLed(LED_CRSF_STOP, true);
   led_Start_WiFi.initLed(LED_CRSF_WiFi, false);
@@ -248,8 +298,9 @@ void setup() {
     
   firstInitAnalogDataForChannels();
   crsf.sendFrameToFC();
-  StartTimer(0, 80, true);
 
+  StartTimer(0, 80, true);
+  StartTimer_2(2, 80, true);
  
 }
 
